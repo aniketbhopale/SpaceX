@@ -1,5 +1,14 @@
-python
 pandas
 numpy
 geopy
 folium
+pydantic
+pymupdf
+pdfplumber
+pytesseract
+Pillow
+python-dotenv
+langchain
+langchain-openai
+rapidfuzz
+openai
