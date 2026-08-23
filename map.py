@@ -351,49 +351,39 @@ print(
 
 
 
-search_layer = folium.FeatureGroup(
-    name="Search Wells",
-    show=False
-)
-
-search_layer.add_to(m)
-
-
+# Convert wells to GeoJSON for accurate property search
+geojson_features = []
 for _, well in wells.iterrows():
+    w_id = str(well["well_id"]).strip()
+    w_name = str(well["well_name"]).strip()
+    geojson_features.append({
+        "type": "Feature",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [float(well["longitude"]), float(well["latitude"])],
+        },
+        "properties": {
+            "well_id": w_id,
+            "search_label": f"{w_id} - {w_name}",
+        },
+    })
 
-    search_marker = folium.Marker(
-
-        location=[
-            float(well["latitude"]),
-            float(well["longitude"])
-        ],
-
-        tooltip=str(
-            well["well_id"]
-        ),
-
-        popup=str(
-            well["well_name"]
-        )
-    )
-
-    search_marker.add_to(
-        search_layer
-    )
-
+search_layer = folium.GeoJson(
+    {"type": "FeatureCollection", "features": geojson_features},
+    name="Search Wells",
+    style_function=lambda x: {"opacity": 0, "fillOpacity": 0},
+    tooltip=folium.GeoJsonTooltip(fields=["search_label"], aliases=["Well:"]),
+    show=True
+).add_to(m)
 
 Search(
-
     layer=search_layer,
-
-    search_label="tooltip",
-
-    placeholder="Search Well ID",
-
+    geom_type="Point",
+    search_label="well_id",
+    search_zoom=14,
+    placeholder="Search Well ID (e.g., W001)...",
     collapsed=False,
-
     position="topright"
-
 ).add_to(m)
 
 
