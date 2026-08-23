@@ -1,0 +1,6 @@
+formation_id,formation_name,formation_type,typical_risk,description
+F001,Sandstone,Clastic (coarse-grained),Mud Loss,A porous synthetic formation where drilling-fluid loss may occur. SYNTHETIC DEMONSTRATION DATA.
+F002,Shale,"Clastic (fine-grained, laminated)",Wellbore Instability / Stuck Pipe,A layered synthetic formation that may contribute to instability or stuck pipe. SYNTHETIC DEMONSTRATION DATA.
+F003,Limestone,Carbonate,Kick,A harder synthetic formation where pressure-related events may occur. SYNTHETIC DEMONSTRATION DATA.
+F004,Claystone,"Clastic (soft, plastic)",Casing Issue / Cementing Issue,A softer synthetic formation that may create casing or cementing challenges. SYNTHETIC DEMONSTRATION DATA.
+F005,Conglomerate,Clastic (mixed-grain),Low / Mixed,A mixed-grain synthetic formation with variable drilling behaviour and generally lower incident rates. SYNTHETIC DEMONSTRATION DATA.
