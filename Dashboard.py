@@ -3,6 +3,7 @@ import os
 import re
 import unicodedata
 import json
+import altair as alt
 import folium
 from folium.plugins import Search
 from geopy.distance import geodesic
@@ -782,6 +783,102 @@ def create_nwis_map(
     return m
 
 
+def create_offset_depth_profile(selected_meta, nearby_wells_df, nearby_events_df, bit_depth):
+    """Build a subsurface cross-section with formation intervals and event depths."""
+    current_well = pd.DataFrame([{
+        "well_id": selected_meta["well_id"],
+        "_id_norm": selected_meta["_id_norm"],
+        "distance_km": 0.0,
+    }])
+    profile_wells = pd.concat(
+        [current_well, nearby_wells_df[["well_id", "_id_norm", "distance_km"]]],
+        ignore_index=True,
+    ).drop_duplicates(subset=["_id_norm"])
+    profile_wells = profile_wells.sort_values("distance_km")
+    well_order = profile_wells["well_id"].tolist()
+
+    formation_intervals = well_formations_df[
+        well_formations_df["_id_norm"].isin(profile_wells["_id_norm"])
+    ].merge(
+        profile_wells[["_id_norm", "well_id", "distance_km"]],
+        on="_id_norm",
+        how="inner",
+    )
+    formation_intervals["top_depth_m"] = pd.to_numeric(
+        formation_intervals["top_depth_m"], errors="coerce"
+    )
+    formation_intervals["bottom_depth_m"] = pd.to_numeric(
+        formation_intervals["bottom_depth_m"], errors="coerce"
+    )
+    formation_intervals = formation_intervals.dropna(
+        subset=["top_depth_m", "bottom_depth_m", "formation_name"]
+    )
+
+    event_points = nearby_events_df.copy()
+    if not event_points.empty:
+        event_points["depth_m"] = pd.to_numeric(event_points["depth_m"], errors="coerce")
+        event_points = event_points.dropna(subset=["depth_m", "well_id", "event_type"])
+
+    if formation_intervals.empty and event_points.empty:
+        return None
+
+    y_encoding = alt.Y(
+        "top_depth_m:Q",
+        title="Measured depth (m) — increasing downward",
+        scale=alt.Scale(reverse=True, nice=True),
+    )
+    layers = []
+    if not formation_intervals.empty:
+        layers.append(
+            alt.Chart(formation_intervals).mark_rect(opacity=0.48).encode(
+                x=alt.X("well_id:N", title="Current well and nearby offset wells", sort=well_order),
+                y=y_encoding,
+                y2="bottom_depth_m:Q",
+                color=alt.Color("formation_name:N", title="Formation"),
+                tooltip=[
+                    alt.Tooltip("well_id:N", title="Well"),
+                    alt.Tooltip("distance_km:Q", title="Offset distance (km)", format=".2f"),
+                    alt.Tooltip("formation_name:N", title="Formation"),
+                    alt.Tooltip("top_depth_m:Q", title="Top depth (m)", format=".0f"),
+                    alt.Tooltip("bottom_depth_m:Q", title="Bottom depth (m)", format=".0f"),
+                ],
+            )
+        )
+    if not event_points.empty:
+        layers.append(
+            alt.Chart(event_points).mark_point(filled=True, size=115, stroke="#0f172a", strokeWidth=0.7).encode(
+                x=alt.X("well_id:N", title="Current well and nearby offset wells", sort=well_order),
+                y=alt.Y("depth_m:Q", scale=alt.Scale(reverse=True), title="Measured depth (m) — increasing downward"),
+                color=alt.Color(
+                    "severity:N",
+                    title="Event severity",
+                    scale=alt.Scale(
+                        domain=["Critical", "High", "Medium", "Low"],
+                        range=["#991b1b", "#dc2626", "#f59e0b", "#2563eb"],
+                    ),
+                ),
+                shape=alt.Shape("event_type:N", title="Event type"),
+                tooltip=[
+                    alt.Tooltip("well_id:N", title="Offset well"),
+                    alt.Tooltip("distance_km:Q", title="Offset distance (km)", format=".2f"),
+                    alt.Tooltip("depth_m:Q", title="Event depth (m)", format=".0f"),
+                    alt.Tooltip("formation:N", title="Formation"),
+                    alt.Tooltip("event_type:N", title="Event"),
+                    alt.Tooltip("severity:N", title="Severity"),
+                    alt.Tooltip("duration_hours:Q", title="Duration (hours)", format=".1f"),
+                ],
+            )
+        )
+
+    # This line places the operator's current bit depth against offset evidence.
+    layers.append(
+        alt.Chart(pd.DataFrame({"depth_m": [bit_depth]})).mark_rule(
+            color="#16a34a", strokeDash=[7, 4], strokeWidth=2
+        ).encode(y=alt.Y("depth_m:Q", scale=alt.Scale(reverse=True)))
+    )
+    return alt.layer(*layers).resolve_scale(color="independent").properties(height=520).interactive()
+
+
 # Section 8: Main dashboard layout and risk analysis
 st.markdown(
     """
@@ -988,7 +1085,26 @@ with info_col:
         st.info("No historical drilling events found in the offset radius.")
 
 
-# Section 9: Detailed tables and model inspection
+# Section 9: Offset-well subsurface structure and depth-event profile
+st.markdown(
+    "<div class='nwis-header'>OFFSET-WELL SUBSURFACE EVENT PROFILE</div>",
+    unsafe_allow_html=True,
+)
+st.caption(
+    "Formation bands show the subsurface intervals for the current well and nearby offsets. "
+    "Event markers show the historical event type and severity at its recorded depth. "
+    "The green dashed line is the current bit depth. This is historical offset evidence, not a prediction."
+)
+depth_profile = create_offset_depth_profile(
+    selected_well_meta, nearby_df, offset_events, current_depth
+)
+if depth_profile is None:
+    st.info("No formation intervals or historical event depths are available for the selected offset corridor.")
+else:
+    st.altair_chart(depth_profile, use_container_width=True)
+
+
+# Section 10: Detailed tables and model inspection
 with st.expander("📊 Offset Well Data Table & Model Details"):
     tab1, tab2, tab3 = st.tabs(
         ["Corridor Offset Wells", "Incident Catalog", "ML Feature Importance"]
