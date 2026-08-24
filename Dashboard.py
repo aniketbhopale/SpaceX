@@ -165,6 +165,27 @@ def resolve_dataset_path(filename):
     return filename
 
 
+def resolve_report_path(well_id, report_type="DDR"):
+    """Return the actual local DDR/WCR PDF for a well, preferring digital reports."""
+    report_name = f"{well_id}_{report_type}.pdf"
+    candidates = [
+        os.path.join("data", "reports", report_name),
+        os.path.join("data", "scanned_reports", report_name),
+        os.path.join("data", "scanned_reports", f"{well_id}_{report_type}_scanned.pdf"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_report_file(report_path):
+    """Cache local PDF bytes for Streamlit's reliable file-download control."""
+    with open(report_path, "rb") as report_file:
+        return report_file.read()
+
+
 def _json_value(value):
     """Convert Pandas/NumPy values to compact JSON-safe chatbot context values."""
     if pd.isna(value):
@@ -941,16 +962,26 @@ with info_col:
                         unsafe_allow_html=True,
                     )
 
-                # Daily Drilling Report (DDR) Link
+                # The old #filename anchor was not a real file URL. Streamlit's
+                # download button reliably serves the actual project PDF instead.
+                report_path = resolve_report_path(w_id, "DDR")
                 st.markdown(
-                    f"""
-                        <div style="margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e2e8f0; font-size: 0.82rem;">
-                            📄 <b>Relevant Report:</b> <a href="#{report_name}" style="color: #0284c7; text-decoration: underline; font-weight: 600;">{report_name}</a>
-                        </div>
-                    </div>
-                    """,
+                    '<div style="margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e2e8f0; font-size: 0.82rem;">'
+                    '<b>📄 Relevant Report</b></div>',
                     unsafe_allow_html=True,
                 )
+                if report_path:
+                    st.download_button(
+                        label=f"Open / download {report_name}",
+                        data=load_report_file(report_path),
+                        file_name=os.path.basename(report_path),
+                        mime="application/pdf",
+                        key=f"report-download-{w_id}",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption(f"No local DDR PDF was found for {w_id}.")
+                st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("</div>", unsafe_allow_html=True)
     else:
