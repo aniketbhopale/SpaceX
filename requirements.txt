@@ -12,3 +12,5 @@ langchain
 langchain-openai
 rapidfuzz
 openai
+sklearn
+streamlit
