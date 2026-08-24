@@ -30,7 +30,9 @@ except ImportError:  # Helpful when a user has not installed optional OpenAI sup
 MIN_TEXT_CHARS = 50
 OCR_DPI = 250
 OCR_THRESHOLD = False
-TESSERACT_CMD: Optional[str] = None
+# Set TESSERACT_CMD in .env to the full tesseract.exe path when it is not on
+# Windows PATH, for example: TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+TESSERACT_CMD: Optional[str] = os.getenv("TESSERACT_CMD") or None
 DEFAULT_INPUT_DIR = "./data"
 DEFAULT_DATASET_DIR = "./dataset" if Path("./dataset").exists() else "./datasets"
 DEFAULT_OUTPUT_DIR = "./output"
@@ -165,10 +167,15 @@ def _configure_tesseract() -> Any:
         import pytesseract
     except ImportError as exc:
         raise RuntimeError("pytesseract is not installed. Run: pip install pytesseract Pillow") from exc
-    candidate = TESSERACT_CMD
+    # Read the environment again because .env is loaded by main() after module import.
+    candidate = TESSERACT_CMD or os.getenv("TESSERACT_CMD")
     if not candidate:
-        standard = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
-        candidate = str(standard) if standard.exists() else shutil.which("tesseract")
+        standard_paths = (
+            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+        )
+        candidate = next((str(path) for path in standard_paths if path.exists()), None)
+        candidate = candidate or shutil.which("tesseract")
     if candidate:
         pytesseract.pytesseract.tesseract_cmd = str(candidate)
     try:

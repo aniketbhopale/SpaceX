@@ -2,6 +2,7 @@
 import os
 import re
 import unicodedata
+import json
 import folium
 from folium.plugins import Search
 from geopy.distance import geodesic
@@ -11,6 +12,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 import streamlit as st
 import streamlit.components.v1 as components
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# Reads OPENAI_API_KEY from .env without displaying it in the dashboard or logs.
+load_dotenv()
+CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 # Section 1: Page setup and UI styling
 st.set_page_config(
@@ -156,6 +163,90 @@ def resolve_dataset_path(filename):
         if os.path.exists(path):
             return path
     return filename
+
+
+def _json_value(value):
+    """Convert Pandas/NumPy values to compact JSON-safe chatbot context values."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def build_well_chat_context(
+    selected_meta, nearby_wells, nearby_events, formation, depth, telemetry, risk
+):
+    """Build the bounded evidence context used by the well-information chatbot."""
+    well_info = {
+        key: _json_value(value)
+        for key, value in selected_meta.drop(labels=["_id_norm"], errors="ignore").items()
+    }
+    nearby_columns = [
+        "well_id", "well_name", "field", "distance_km", "total_depth_m",
+        "primary_formation", "well_status",
+    ]
+    event_columns = [
+        "well_id", "distance_km", "depth_m", "formation", "event_type",
+        "severity", "duration_hours", "operational_impact",
+    ]
+    nearby_summary = (
+        nearby_wells.reindex(columns=nearby_columns).head(30).map(_json_value).to_dict("records")
+        if not nearby_wells.empty else []
+    )
+    event_summary = (
+        nearby_events.reindex(columns=event_columns).head(80).map(_json_value).to_dict("records")
+        if not nearby_events.empty else []
+    )
+    return {
+        "current_well": well_info,
+        "operational_context": {
+            "bit_depth_m": depth,
+            "formation_at_depth": formation,
+            "telemetry": telemetry,
+            "risk_assessment": {
+                key: _json_value(value)
+                for key, value in risk.items()
+                if key not in {"similar_events_df", "badge_style", "level_display"}
+            },
+        },
+        "nearby_wells": nearby_summary,
+        "historical_offset_events": event_summary,
+    }
+
+
+def ask_well_chatbot(question, context, chat_history):
+    """Answer from supplied well evidence only; the OpenAI key is never exposed."""
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY is missing. Add it to .env and restart Streamlit.")
+
+    system_prompt = """
+You are the NWIS Well Information Assistant for an oil and gas offset-well
+intelligence dashboard. Answer using ONLY the supplied structured evidence.
+Do not invent well properties, depths, locations, formations, events, or risk
+facts. If evidence is missing, state that it is not available in the loaded
+datasets. Be concise, identify the well/event evidence behind claims, and make
+clear that this dashboard aid does not replace approved drilling procedures or
+real-time operational controls.
+""".strip()
+    prior_messages = [
+        {"role": message["role"], "content": message["content"]}
+        for message in chat_history[-6:]
+    ]
+    user_message = (
+        "CURRENT DATA EVIDENCE:\n"
+        + json.dumps(context, default=str, ensure_ascii=False)
+        + "\n\nUSER QUESTION:\n"
+        + question
+    )
+    client = OpenAI()
+    response = client.responses.create(
+        model=CHAT_MODEL,
+        instructions=system_prompt,
+        input=prior_messages + [{"role": "user", "content": user_message}],
+        store=False,
+    )
+    return response.output_text.strip() or "No answer was returned by the model."
 
 
 @st.cache_data
@@ -922,3 +1013,70 @@ with st.expander("📊 Offset Well Data Table & Model Details"):
             }
         ).sort_values(by="Importance Weight (%)", ascending=False)
         st.dataframe(fi_df, use_container_width=True)
+
+
+# Section 10: Data-grounded well information chatbot
+st.divider()
+st.markdown("<div class='nwis-header'>WELL INFORMATION ASSISTANT</div>", unsafe_allow_html=True)
+st.caption(
+    "Ask about the selected well, offset wells, formations, historical events, "
+    "or the current risk evidence. Responses are grounded only in loaded dashboard data."
+)
+
+if "well_chat_messages" not in st.session_state:
+    st.session_state.well_chat_messages = [
+        {
+            "role": "assistant",
+            "content": "Ask me about the selected well, nearby offsets, historical events, or current risk evidence.",
+        }
+    ]
+
+chat_col, clear_col = st.columns([0.86, 0.14])
+with clear_col:
+    if st.button("Clear chat", use_container_width=True):
+        st.session_state.well_chat_messages = [
+            {
+                "role": "assistant",
+                "content": "Chat cleared. Ask about the currently selected well.",
+            }
+        ]
+        st.rerun()
+
+with chat_col:
+    if not os.getenv("OPENAI_API_KEY"):
+        st.warning("Chatbot disabled: add OPENAI_API_KEY to .env, then restart Streamlit.")
+    else:
+        for message in st.session_state.well_chat_messages:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+
+        question = st.chat_input("Example: What historical risks are near the current depth?")
+        if question:
+            st.session_state.well_chat_messages.append({"role": "user", "content": question})
+            with st.chat_message("user"):
+                st.write(question)
+
+            context = build_well_chat_context(
+                selected_well_meta,
+                nearby_df,
+                offset_events,
+                current_formation,
+                current_depth,
+                {
+                    "mud_weight_ppg": live_mw,
+                    "rop_m_per_hr": live_rop,
+                    "rpm": live_rpm,
+                    "wob_klbf": live_wob,
+                },
+                ai_risk,
+            )
+            with st.chat_message("assistant"):
+                with st.spinner("Reviewing selected-well evidence..."):
+                    try:
+                        answer = ask_well_chatbot(
+                            question, context, st.session_state.well_chat_messages[:-1]
+                        )
+                    except Exception as exc:
+                        answer = f"I could not answer that request: {exc}"
+                st.write(answer)
+            st.session_state.well_chat_messages.append({"role": "assistant", "content": answer})
