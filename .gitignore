@@ -45,6 +45,7 @@ share/wheels/
 .installed.cfg
 *.egg
 MANIFEST
+output_ocr_test/
 
 # ==============================================================================
 # Testing, Coverage, and CI/CD

@@ -1016,10 +1016,9 @@ with info_col:
 
     if not offset_events.empty:
         grouped_wells = offset_events.groupby("well_id")
-
-        st.markdown(
-            '<div class="scrollable-events-container">', unsafe_allow_html=True
-        )
+        # Native Streamlit scrolling keeps this risk-analysis panel compact.
+        # 600 px shows approximately two to three nearby-well event cards.
+        events_scroll_panel = st.container(height=600, border=False)
 
         for w_id, w_ev_df in grouped_wells:
             is_sus = w_id in suspected_well_ids
@@ -1031,7 +1030,7 @@ with info_col:
             tag_bg = "#fef2f2" if is_sus else "#f1f5f9"
             tag_color = "#dc2626" if is_sus else "#475569"
 
-            with st.container():
+            with events_scroll_panel.container():
                 st.markdown(
                     f"""
                     <div style="border: 1px solid {card_border}; background: #ffffff; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px;">
@@ -1080,7 +1079,6 @@ with info_col:
                     st.caption(f"No local DDR PDF was found for {w_id}.")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("</div>", unsafe_allow_html=True)
     else:
         st.info("No historical drilling events found in the offset radius.")
 
