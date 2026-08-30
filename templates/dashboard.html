@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NWIS — Offset Well Intelligence Platform</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+</head>
+<body>
+<aside>
+  <h2>🛢️ eRTMAC-NWIS</h2><p>Nearby Wells Intelligence System</p>
+  <form method="get" id="controls">
+    <label>🔍 Select Well</label><select name="well" onchange="this.form.submit()">{% for well in wells %}<option value="{{ well }}" {% if well == selected.well_id %}selected{% endif %}>{{ well }}</option>{% endfor %}</select>
+    <label>Offset Search Radius: <b id="radiusValue">{{ radius|int }} km</b></label><input type="range" name="radius" min="3" max="30" value="{{ radius }}" oninput="radiusValue.textContent=this.value+' km'" onchange="this.form.submit()">
+    <label>Bit Depth: <b id="depthValue">{{ depth|int }} m</b></label><input type="range" name="depth" min="25" max="{{ max_depth }}" step="10" value="{{ depth }}" oninput="depthValue.textContent=this.value+' m'" onchange="this.form.submit()">
+    <details><summary>Telemetry Adjustments</summary>
+      <label>Mud Weight (ppg)</label><input name="mud_weight_ppg" type="number" step=".1" value="{{ telemetry.mud_weight_ppg }}">
+      <label>ROP (m/hr)</label><input name="rop_m_per_hr" type="number" step=".1" value="{{ telemetry.rop_m_per_hr }}">
+      <label>RPM</label><input name="rpm" type="number" step="1" value="{{ telemetry.rpm }}">
+      <label>Weight on Bit (klbf)</label><input name="wob_klbf" type="number" step=".1" value="{{ telemetry.wob_klbf }}">
+      <button type="submit">Update analysis</button>
+    </details>
+  </form>
+</aside>
+<main>
+  <header><div><h1>🛢️ NWIS DASHBOARD</h1><p>AI-Powered Offset Well Decision Support Platform</p></div><span>● eRTMAC Active</span></header>
+  <section class="metrics"><article><small>Current Well</small><b>{{ selected.well_id }} — {{ selected.well_name }}</b></article><article><small>Depth</small><b>{{ depth|int }} m</b></article><article><small>Formation</small><b class="formation">{{ formation }}</b></article><article><small>Suspected Wells in Radius</small><b class="danger">{{ suspected|length }} / {{ nearby|length }} Wells</b></article></section>
+  <section class="main-grid"><div><h3>MAP</h3><div class="map">{{ map_html|safe }}</div><p class="legend"><span class="green">●</span> Current Well ({{ selected.well_id }}) <span class="red">●</span> Nearby Suspected Wells ({{ suspected|length }}) <span class="blue">●</span> Normal Wells</p></div>
+  <div><h3>DRILLING RISK ANALYSIS</h3><article class="risk {{ risk.css }}"><b>{{ risk.level }} RISK</b><strong>{{ risk.hazard }} risk detected</strong>{% if risk.matching_wells_count %}<p>{{ risk.matching_wells_count }} nearby well(s) had similar events around {{ risk.depth_range[0] }}–{{ risk.depth_range[1] }} m.</p>{% else %}<p>No direct offset incident at this depth; evaluated against {{ formation }} evidence.</p>{% endif %}</article>
+    <h3>HISTORICAL EVENTS (OFFSET WELLS)</h3><div class="event-scroll">{% for well_id, group in events|groupby('well_id') %}<article class="event-card {% if well_id in suspected %}suspected{% endif %}"><div class="event-head"><b>Well {{ well_id }} ({{ group[0].distance_km }} km)</b><span>{% if well_id in suspected %}SUSPECTED HAZARD{% else %}OFFSET LOG{% endif %}</span></div>{% for event in group %}<p>• <b>{{ event.event_type }}</b> at <b>{{ event.depth_m }} m</b> ({{ event.severity }} Severity) — <i>{{ event.operational_impact }}</i></p>{% endfor %}<a href="{{ url_for('download_report', well_id=well_id, report_type='DDR') }}" target="_blank">📄 Open Relevant Report: {{ well_id }}_DDR.pdf</a></article>{% else %}<p>No historical drilling events found in the offset radius.</p>{% endfor %}</div>
+  </div></section>
+  <section><h3>OFFSET-WELL SUBSURFACE EVENT PROFILE</h3><p class="caption">Formation bands show subsurface intervals; event markers show the recorded event depth/type/severity. The green dashed line is current bit depth.</p>{% if profile_spec %}<div id="depth-profile"></div>{% else %}<p>No profile data is available.</p>{% endif %}</section>
+  <section class="details"><details><summary>📊 Offset Well Data Table & Model Details</summary><h4>Corridor Offset Wells</h4><table><tr><th>Well</th><th>Name</th><th>Distance (km)</th><th>Formation</th><th>Status</th></tr>{% for well in nearby %}<tr><td>{{ well.well_id }}</td><td>{{ well.well_name }}</td><td>{{ well.distance_km }}</td><td>{{ well.primary_formation }}</td><td>{{ well.well_status }}</td></tr>{% endfor %}</table><h4>Model Feature Importance</h4><table><tr><th>Feature</th><th>Importance (%)</th></tr>{% for item in feature_importance %}<tr><td>{{ item.feature }}</td><td>{{ item.importance }}</td></tr>{% endfor %}</table></details></section>
+  <section class="chat"><h3>WELL INFORMATION ASSISTANT</h3><p class="caption">Ask about this well, nearby offsets, formations, events, or current risk evidence.</p>{% if chat_enabled %}<div id="messages"><div class="assistant">Ask me about the selected well, nearby offsets, historical events, or current risk evidence.</div></div><form id="chatForm"><input id="question" placeholder="Example: What historical risks are near the current depth?" required><button>Send</button><button type="button" id="clear">Clear</button></form>{% else %}<p class="warning">Chatbot disabled: add OPENAI_API_KEY to .env and restart Flask.</p>{% endif %}</section>
+</main>
+{% if profile_spec %}<script>vegaEmbed('#depth-profile', {{ profile_spec|tojson }}, {actions:false, renderer:'svg'});</script>{% endif %}
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body></html>
